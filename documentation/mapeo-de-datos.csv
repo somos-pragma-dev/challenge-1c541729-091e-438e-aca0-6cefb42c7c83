@@ -1,0 +1,68 @@
+campo_origen,tipo_origen,obligatorio_origen,campo_destino,tipo_destino,obligatorio_destino,regla_transformacion
+solicitud_id,string,si,solicitudId,uuid,si,Generado por el originador como UUID v4; se preserva en todo el flujo para trazabilidad
+idempotency_key,string,si,idempotencyKey,uuid,si,UUID v4 proporcionado por el cliente; debe ser único por cada intento de solicitud
+fecha_solicitud,datetime,si,fechaSolicitud,datetime-iso8601,si,Se normaliza a formato ISO 8601 con timezone UTC
+canal_origen,string,si,canalOrigen,string,si,Valor exacto del canal: "WEB", "MOBILE", "BRANCH", "API"
+producto,string,si,producto,string,si,Valores permitidos: "CONSUMO", "MICROCREDITO", "NOMINA", "HIPOTECARIO"
+monto_solicitado,decimal,si,montoSolicitado,decimal,si,Monto en moneda local con 2 decimales; rango: 1000-500000
+plazo_meses,integer,si,plazoMeses,integer,si,Rango válido: 3-72 meses; múltiplo de 1
+tasa_interes,decimal,no,tasaInteres,decimal,si,Si no se proporciona, se calcula automáticamente según scoring
+	
+### Datos del Solicitante
+tipo_documento,string,si,tipoDocumento,string,si,Valores: "CC", "CE", "TI", "PASAPORTE", "NIT"
+numero_documento,string,si,numeroDocumento,string,si,Sin máscara; se sanitiza para eliminar caracteres especiales
+nombre_completo,string,si,nombreCompleto,string,si,Mayúsculas automático; se normaliza espacios
+fecha_nacimiento,date,si,fechaNacimiento,date-iso8601,si,Mayor de edad (>=18 años) verificado
+genero,string,no,genero,string,si,Valores: "M", "F", "O", "NS" (no specify)
+estado_civil,string,no,estadoCivil,string,si,Valores: "SOLTERO", "CASADO", "UNION_LIBRE", "DIVORCIADO", "VIUDO"
+nivel_educativo,string,no,nivelEducativo,string,si,Valores: "PRIMARIA", "SECUNDARIA", "TECNICO", "UNIVERSITARIO", "POSTGRADO"
+	
+### Información de Contacto
+direccion_residencia,string,si,direccionResidencia,string,si,Dirección completa formateada
+ciudad_residencia,string,si,ciudadResidencia,string,si,Código DANE de municipio (5 dígitos)
+departamento,string,si,departamento,string,si,Código DANE de departamento (2 dígitos)
+telefono_movil,string,si,telefonoMovil,string,si,Formato: 10 dígitos sin prefijo internacional
+telefono_fijo,string,no,telefonoFijo,string,si,Formato: 10 dígitos
+email,string,si,email,email,si,Validación RFC 5322; se convierte a minúsculas
+	
+### Información Laboral
+tipo_empleo,string,si,tipoEmpleo,string,si,Valores: "DEPENDIENTE", "INDEPENDIENTE", "PENSIONADO", "EMPRESARIO"
+nombre_empresa,string,si,nombreEmpresa,string,si,Para dependientes: razón social; para independientes: nombre del negocio
+nit_empresa,string,no,nitEmpresa,string,si,Para dependientes: NIT de la empresa; para independientes: NIT propio
+cargo,string,no,cargo,string,si,Cargo del solicitante en la empresa
+antiguedad_meses,integer,si,antiguedadMeses,integer,si,Mínimo 1 mes; máximo 480 meses (40 años)
+salario_bruto,decimal,si,salarioBruto,decimal,si,Ingreso mensual bruto; se valida contra rango del producto
+otros_ingresos,decimal,no,otrosIngresos,decimal,si,Ingresos adicionales mensuales; si es null, asume 0
+descuento_nomina,decimal,no,descuentoNomina,decimal,si,Descuentos por nómina (parafiscales, etc.)
+	
+### Datos Calculados (derivados)
+salario_neto,—,no,salarioNeto,decimal,si,"Regla: salario_neto = salario_bruto - descuento_nomina + otros_ingresos"
+capacidad_pago,—,no,capacidadPago,decimal,si,"Regla: capacidad_pago = salario_neto * 0.40 (índice de endeudamiento 40%)"
+monto_cuota,—,no,montoCuota,decimal,si,"Regla: calculada usando fórmula de amortización francesa con tasa_interes"
+relacion_deuda_ingreso,—,no,relacionDeudaIngreso,decimal,si,"Regla: relacion_deuda_ingreso = (cuota_actual + monto_cuota) / salario_neto"
+	
+### Datos del Buró de Riesgos
+bureau_score,—,no,bureauScore,integer,si,Score retornado por el buró (rango 300-900)
+bureau_alertas,—,no,bureauAlertas,array,si,Lista de alertas activas en el buró
+bureau_deudas_vigentes,—,no,bureauDeudasVigentes,integer,si,Cantidad de obligaciones vigentes
+bureau_cuentas_moras,—,no,bureauCuentasMorosas,integer,si,Cantidad de cuentas en mora
+bureau_consultas_recientes,—,no,bureauConsultasRecientes,integer,si,Consultas en últimos 6 meses
+bureau_estado,—,no,bureauEstado,string,si,"Valores: SUCCESS, TIMEOUT, UNAVAILABLE, INVALID_CLIENT"
+	
+### Datos del Motor Antifraude
+antifraud_score,—,no,antifraudScore,integer,si,Score de riesgo antifraude (rango 0-1000)
+antifraud_nivel_riesgo,—,no,antifraudNivelRiesgo,string,si,Valores: "BAJO", "MEDIO", "ALTO", "CRITICO"
+antifraud_alertas,—,no,antifraudAlertas,array,si,Lista de alertas de fraude detectadas
+antifraud_validacion_identidad,—,no,antifraudValidacionIdentidad,boolean,si,Resultado de validación de identidad
+	
+### Resultado de la Evaluación
+decision,—,no,decision,string,si,"Valores: APROBADO, RECHAZADO, REVISION_MANUAL, APROBADO_CONDICIONES"
+motivo_rechazo,—,no,motivoRechazo,string,si,"Valores: SCORE_BAJO, CAPACIDAD_INSUFICIENTE, HISTORIAL_NEGATIVO, DATOS_INVALIDOS, FRAUDE_DETECTADO, DUPLICADO"
+numero_credito,—,no,numeroCredito,string,si,Generado por el Core Bancario; formato: CRED-YYYYMMDD-XXXXXX
+fecha_aprobacion,—,no,fechaAprobacion,datetime-iso8601,si,Timestamp de aprobación en UTC
+	
+### Metadata
+request_timestamp,—,si,requestTimestamp,datetime-iso8601,si,Timestamp de recepción de la solicitud
+processing_time_ms,—,si,processingTimeMs,integer,si,Tiempo total de procesamiento en milisegundos
+api_version,—,si,apiVersion,string,si,Versión del contrato de API utilizada
+warnings,—,no,warnings,array,si,Lista de warnings generados durante el procesamiento

@@ -1,0 +1,936 @@
+openapi: 3.1.0
+info:
+  title: Canal Transaccional - API de Crédito
+  description: |
+    Contrato de API para el canal transaccional de gestión de créditos.
+    Integración con originador de créditos, motor antifraude, buró de riesgos y core bancario.
+    
+    ## Características Principales
+    - Idempotencia en operaciones de crédito mediante header Idempotency-Key
+    - Throughput: 1,500 rps en hora pico
+    - Latencia máxima: 200ms
+    - SLA: 99.9%
+    - Tolerancia a fallos temporales del buró de riesgos
+    
+    ## Estándares Aplicados
+    - BIAN Service Domains para modelado de servicios financieros
+    - ISO 20022 para mensajes financieros
+    - FAPI para seguridad en APIs financieras
+  version: 1.0.0
+  contact:
+    name: Equipo de Integración
+    email: integracion@empresa.com
+  license:
+    name: Proprietario
+    url: https://empresa.com/licencia
+extensions:
+  x-throughput: 1500
+  x-max-latency: 200
+  x-sla: 99.9
+  x-bian-version: "17.06"
+servers:
+  - url: https://api.canal-transaccional.empresa.com/v1
+    description: Servidor de producción
+    variables:
+      version:
+        default: v1
+  - url: https://sandbox.canal-transaccional.empresa.com/v1
+    description: Servidor de sandbox para pruebas
+security:
+  - OAuth2ClientCredentials: []
+  - ApiKeyHeader: []
+tags:
+  - name: Créditos
+    description: Operaciones de gestión de solicitudes de crédito
+  - name: Consultas
+    description: Consultas de estado y historial
+  - name: Salud
+    description: Endpoints de health check y métricas
+paths:
+  /creditos/solicitudes:
+    post:
+      tags:
+        - Créditos
+      summary: Crear solicitud de crédito
+      description: |
+        Crea una nueva solicitud de crédito en el canal transaccional.
+        El proceso orquesta las validaciones de antifraude, buró de riesgos y confirmación del core bancario.
+        
+        ## Idempotencia
+        Este endpoint es idempotente. Envíe el header `Idempotency-Key` con un UUID único
+        para evitar duplicados en caso de reintentos por timeout.
+        
+        ## Flujo de Procesamiento
+        1. Validación de solicitud (schema)
+        2. Evaluación antifraude
+        3. Consulta buró de riesgos
+        4. Registro en core bancario
+        5. Respuesta al cliente
+      operationId: crearSolicitudCredito
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/X-Correlation-ID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudCredito'
+            example:
+              solicitud_id: "SOL-2024-00012345"
+              cliente:
+                tipo_documento: "CC"
+                numero_documento: "1234567890"
+                nombre: "Juan Pérez García"
+                correo: "juan.perez@email.com"
+                telefono: "+573001234567"
+              credito:
+                monto: 50000000
+                moneda: "COP"
+                plazo_meses: 36
+                tasa_interes: 1.5
+                destino: "CONSUMO"
+              ingreso:
+                salary: 8000000
+                otros_ingresos: 500000
+                salary_neto: 6800000
+              empleo:
+                tipo_contrato: "FIJO"
+                antiguedad_meses: 24
+                empresa: "Empresa ABC SAS"
+      responses:
+        '201':
+          description: Solicitud de crédito creada exitosamente
+          headers:
+            X-Correlation-ID:
+              schema:
+                type: string
+              description: Correlation ID para trazabilidad
+            X-Request-Id:
+              schema:
+                type: string
+              description: ID único de la solicitud
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaSolicitudCredito'
+              example:
+                solicitud_id: "SOL-2024-00012345"
+                estado: "APROBADO"
+                mensaje: "Solicitud aprobada"
+                fecha_aprobacion: "2024-01-15T10:30:00Z"
+                numero_credito: "CRE-2024-00098765"
+                detalles:
+                  monto_aprobado: 50000000
+                  tasa_interes: 1.5
+                  plazo_meses: 36
+                  cuota_mensual: 1687500
+        '400':
+          $ref: '#/components/responses/ErrorValidacion'
+        '401':
+          $ref: '#/components/responses/ErrorAutenticacion'
+        '403':
+          $ref: '#/components/responses/ErrorAutorizacion'
+        '409':
+          $ref: '#/components/responses/ErrorConflicto'
+        '422':
+          $ref: '#/components/responses/ErrorNegocio'
+        '429':
+          $ref: '#/components/responses/ErrorRateLimit'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+        '503':
+          $ref: '#/components/responses/ErrorServicioNoDisponible'
+  /creditos/solicitudes/{solicitudId}:
+    get:
+      tags:
+        - Consultas
+      summary: Consultar estado de solicitud de crédito
+      description: |
+        Consulta el estado actual de una solicitud de crédito previamente creada.
+        Retorna información completa incluyendo historial de estados y evaluaciones.
+      operationId: consultarSolicitudCredito
+      parameters:
+        - name: solicitudId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^SOL-[0-9]{4}-[0-9]{8}$'
+          description: ID de la solicitud de crédito
+          example: "SOL-2024-00012345"
+        - $ref: '#/components/parameters/X-Correlation-ID'
+      responses:
+        '200':
+          description: Solicitud encontrada
+          headers:
+            X-Correlation-ID:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetalleSolicitudCredito'
+        '404':
+          $ref: '#/components/responses/ErrorNoEncontrado'
+        '429':
+          $ref: '#/components/responses/ErrorRateLimit'
+  /creditos/solicitudes/{solicitudId}/evaluaciones:
+    get:
+      tags:
+        - Consultas
+      summary: Consultar evaluaciones de una solicitud
+      description: |
+        Retorna las evaluaciones realizadas por el motor antifraude y buró de riesgos.
+        Útil para auditoría y diagnóstico de rechazos.
+      operationId: consultarEvaluacionesSolicitud
+      parameters:
+        - name: solicitudId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: ID de la solicitud
+        - $ref: '#/components/parameters/X-Correlation-ID'
+      responses:
+        '200':
+          description: Evaluaciones recuperadas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListaEvaluaciones'
+        '404':
+          $ref: '#/components/responses/ErrorNoEncontrado'
+  /creditos/{creditoId}/desembolso:
+    post:
+      tags:
+        - Créditos
+      summary: Ejecutar desembolso de crédito
+      description: |
+        Ejecuta el desembolso de un crédito aprobado. Requiere que el crédito
+        esté en estado APROBADO y no haya sido desembolsado anteriormente.
+      operationId: ejecutarDesembolso
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/X-Correlation-ID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudDesembolso'
+      responses:
+        '200':
+          description: Desembolso ejecutado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaDesembolso'
+        '400':
+          $ref: '#/components/responses/ErrorValidacion'
+        '409':
+          $ref: '#/components/responses/ErrorConflicto'
+  /creditos/clientes/{numeroDocumento}/historial:
+    get:
+      tags:
+        - Consultas
+      summary: Consultar historial de créditos de un cliente
+      description: |
+        Retorna el historial de solicitudes y créditos de un cliente específico.
+        Utilizado para análisis de comportamiento crediticio.
+      operationId: consultarHistorialCliente
+      parameters:
+        - name: numeroDocumento
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Número de documento del cliente
+        - name: tipoDocumento
+          in: query
+          schema:
+            type: string
+            enum:
+              - CC
+              - CE
+              - NIT
+              - PASAPORTE
+        - name: estado
+          in: query
+          schema:
+            type: string
+            enum:
+              - APROBADO
+              - RECHAZADO
+              - CANCELADO
+              - DESEMBOLSADO
+        - $ref: '#/components/parameters/X-Correlation-ID'
+      responses:
+        '200':
+          description: Historial del cliente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistorialCliente'
+        '404':
+          $ref: '#/components/responses/ErrorNoEncontrado'
+  /health:
+    get:
+      tags:
+        - Salud
+      summary: Health check de la API
+      description: |
+        Endpoint de verificación de salud. Retorna el estado de la API
+        y sus dependencias (antifraude, buró, core bancario).
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Sistema saludable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: Sistema no saludable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+  /metrics:
+    get:
+      tags:
+        - Salud
+      summary: Métricas de la API
+      description: |
+        Retorna métricas operativas incluyendo throughput, latencia y tasa de errores.
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Métricas recuperadas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricasAPI'
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Clave de idempotencia única (UUID v4). Obligatorio para operaciones
+        de crédito que modifican estado. Debe ser único por cada intento de operación.
+        Si se reenvía una solicitud con la misma clave, se retorna la respuesta original
+        sin reprocesar.
+      schema:
+        type: string
+        format: uuid
+      example: "550e8400-e29b-41d4-a716-446655440000"
+    X-Correlation-ID:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      description: |
+        Correlation ID para trazabilidad de solicitudes a través de múltiples servicios.
+        Si no se provee, el servidor generará uno.
+      schema:
+        type: string
+        format: uuid
+      example: "550e8400-e29b-41d4-a716-446655440001"
+  schemas:
+    SolicitudCredito:
+      type: object
+      required:
+        - solicitud_id
+        - cliente
+        - credito
+        - ingreso
+        - empleo
+      properties:
+        solicitud_id:
+          type: string
+          pattern: '^SOL-[0-9]{4}-[0-9]{8}$'
+          description: Identificador único de la solicitud
+          example: "SOL-2024-00012345"
+        cliente:
+          $ref: '#/components/schemas/DatosCliente'
+        credito:
+          $ref: '#/components/schemas/DatosCredito'
+        ingreso:
+          $ref: '#/components/schemas/DatosIngreso'
+        empleo:
+          $ref: '#/components/schemas/DatosEmpleo'
+    DatosCliente:
+      type: object
+      required:
+        - tipo_documento
+        - numero_documento
+        - nombre
+        - correo
+      properties:
+        tipo_documento:
+          type: string
+          enum:
+            - CC
+            - CE
+            - NIT
+            - PASAPORTE
+          description: Tipo de documento de identificación
+        numero_documento:
+          type: string
+          minLength: 5
+          maxLength: 20
+          description: Número de documento
+        nombre:
+          type: string
+          maxLength: 200
+          description: Nombre completo del cliente
+        correo:
+          type: string
+          format: email
+          description: Correo electrónico
+        telefono:
+          type: string
+          pattern: '^\+[1-9]\\d{1,14}$'
+          description: Teléfono con código de país
+        fecha_nacimiento:
+          type: string
+          format: date
+          description: Fecha de nacimiento
+    DatosCredito:
+      type: object
+      required:
+        - monto
+        - moneda
+        - plazo_meses
+        - tasa_interes
+        - destino
+      properties:
+        monto:
+          type: integer
+          minimum: 100000
+          maximum: 500000000
+          description: Monto solicitado en centavos
+          example: 50000000
+        moneda:
+          type: string
+          enum:
+            - COP
+            - USD
+            - EUR
+          default: COP
+        plazo_meses:
+          type: integer
+          minimum: 1
+          maximum: 360
+          description: Plazo en meses
+          example: 36
+        tasa_interes:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 5
+          description: Tasa de interés mensual en porcentaje
+          example: 1.5
+        destino:
+          type: string
+          enum:
+            - CONSUMO
+            - VIVIENDA
+            - VEHICULO
+            - MICROCREDITO
+            - LIBRE_INVERSION
+          description: Destino del crédito
+    DatosIngreso:
+      type: object
+      required:
+        - salary
+        - salary_neto
+      properties:
+        salary:
+          type: integer
+          minimum: 0
+          description: Salario bruto mensual
+          example: 8000000
+        otros_ingresos:
+          type: integer
+          minimum: 0
+          description: Otros ingresos mensuales
+          example: 500000
+        salary_neto:
+          type: integer
+          minimum: 0
+          description: |
+            Salario neto mensual después de deducciones.
+            Regla de transformación: salary_neto = salary * 0.85 (deducciones estándar)
+          example: 6800000
+        deducciones:
+          type: integer
+          minimum: 0
+          description: Total de deducciones
+    DatosEmpleo:
+      type: object
+      required:
+        - tipo_contrato
+        - antiguedad_meses
+      properties:
+        tipo_contrato:
+          type: string
+          enum:
+            - FIJO
+            - INDEFINIDO
+            - PRESTACION_SERVICIOS
+            - INDEPENDIENTE
+          description: Tipo de contrato laboral
+        antiguedad_meses:
+          type: integer
+          minimum: 0
+          maximum: 600
+          description: Antigüedad en meses
+          example: 24
+        empresa:
+          type: string
+          maxLength: 200
+          description: Nombre de la empresa
+        cargo:
+          type: string
+          maxLength: 100
+          description: Cargo del empleado
+    RespuestaSolicitudCredito:
+      type: object
+      required:
+        - solicitud_id
+        - estado
+        - mensaje
+      properties:
+        solicitud_id:
+          type: string
+        estado:
+          type: string
+          enum:
+            - RECIBIDO
+            - EN_PROCESO
+            - APROBADO
+            - RECHAZADO
+            - ERROR
+        mensaje:
+          type: string
+        fecha_aprobacion:
+          type: string
+          format: date-time
+        numero_credito:
+          type: string
+        detalles:
+          $ref: '#/components/schemas/DetallesAprobacion'
+    DetallesAprobacion:
+      type: object
+      properties:
+        monto_aprobado:
+          type: integer
+        tasa_interes:
+          type: number
+        plazo_meses:
+          type: integer
+        cuota_mensual:
+          type: integer
+        score_antifraude:
+          type: integer
+          description: Score del motor antifraude (0-1000)
+        nivel_riesgo:
+          type: string
+          enum:
+            - BAJO
+            - MEDIO
+            - ALTO
+            - CRITICO
+    DetalleSolicitudCredito:
+      type: object
+      properties:
+        solicitud_id:
+          type: string
+        estado:
+          type: string
+        cliente:
+          $ref: '#/components/schemas/DatosCliente'
+        credito:
+          $ref: '#/components/schemas/DatosCredito'
+        historial_estados:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistorialEstado'
+        evaluaciones:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResultadoEvaluacion'
+        fechas:
+          $ref: '#/components/schemas/FechasSolicitud'
+    HistorialEstado:
+      type: object
+      properties:
+        estado:
+          type: string
+        fecha:
+          type: string
+          format: date-time
+        usuario:
+          type: string
+        motivo:
+          type: string
+    ResultadoEvaluacion:
+      type: object
+      properties:
+        evaluador:
+          type: string
+          enum:
+            - ANTIFRAUDE
+            - BURO_RIESGOS
+            - CORE_BANCARIO
+        resultado:
+          type: string
+          enum:
+            - APROBADO
+            - RECHAZADO
+            - REVISION
+            - NO_APLICA
+        score:
+          type: integer
+        detalle:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+    FechasSolicitud:
+      type: object
+      properties:
+        creacion:
+          type: string
+          format: date-time
+        ultima_actualizacion:
+          type: string
+          format: date-time
+        aprobacion:
+          type: string
+          format: date-time
+        rechazo:
+          type: string
+          format: date-time
+    ListaEvaluaciones:
+      type: object
+      properties:
+        solicitud_id:
+          type: string
+        evaluaciones:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResultadoEvaluacion'
+    SolicitudDesembolso:
+      type: object
+      required:
+        - creditoId
+        - cuenta_destino
+      properties:
+        creditoId:
+          type: string
+        cuenta_destino:
+          $ref: '#/components/schemas/CuentaBancaria'
+        fecha_ejecucion:
+          type: string
+          format: date
+    CuentaBancaria:
+      type: object
+      required:
+        - numero_cuenta
+        - tipo_cuenta
+        - banco
+      properties:
+        numero_cuenta:
+          type: string
+        tipo_cuenta:
+          type: string
+          enum:
+            - AHORROS
+            - CORRIENTE
+        banco:
+          type: string
+    RespuestaDesembolso:
+      type: object
+      properties:
+        credito_id:
+          type: string
+        estado_desembolso:
+          type: string
+          enum:
+            - EJECUTADO
+            - PENDIENTE
+            - FALLIDO
+        referencia:
+          type: string
+        fecha_ejecucion:
+          type: string
+          format: date-time
+    HistorialCliente:
+      type: object
+      properties:
+        numero_documento:
+          type: string
+        solicitudes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResumenSolicitud'
+    ResumenSolicitud:
+      type: object
+      properties:
+        solicitud_id:
+          type: string
+        fecha:
+          type: string
+          format: date-time
+        estado:
+          type: string
+        monto:
+          type: integer
+        plazo_meses:
+          type: integer
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - HEALTHY
+            - DEGRADED
+            - UNHEALTHY
+        timestamp:
+          type: string
+          format: date-time
+        componentes:
+          type: object
+          properties:
+            api:
+              $ref: '#/components/schemas/ComponenteHealth'
+            antifraude:
+              $ref: '#/components/schemas/ComponenteHealth'
+            buror:
+              $ref: '#/components/schemas/ComponenteHealth'
+            corebancario:
+              $ref: '#/components/schemas/ComponenteHealth'
+    ComponenteHealth:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - UP
+            - DOWN
+            - DEGRADED
+        latency_ms:
+          type: integer
+        last_check:
+          type: string
+          format: date-time
+    MetricasAPI:
+      type: object
+      properties:
+        periodo:
+          type: string
+        totales:
+          type: object
+          properties:
+            solicitudes:
+              type: integer
+            exitosas:
+              type: integer
+            fallidas:
+              type: integer
+        throughput:
+          type: object
+          properties:
+            rps_actual:
+              type: number
+            rps_pico:
+              type: number
+        latencia:
+          type: object
+          properties:
+            promedio_ms:
+              type: number
+            p50_ms:
+              type: number
+            p95_ms:
+              type: number
+            p99_ms:
+              type: number
+        errores:
+          type: object
+          properties:
+            tasa:
+              type: number
+            por_codigo:
+              type: object
+              additionalProperties:
+                type: integer
+    ErrorEstandar:
+      type: object
+      required:
+        - codigo
+        - mensaje
+      properties:
+        codigo:
+          type: string
+          description: Código de error interno
+          example: "VALIDACION_CAMPO_REQUERIDO"
+        mensaje:
+          type: string
+          description: Mensaje legible para el cliente
+          example: "El campo monto es requerido"
+        detalle:
+          type: string
+          description: Detalle técnico del error
+        campo:
+          type: string
+          description: Campo que causó el error
+          example: "credito.monto"
+  responses:
+    ErrorValidacion:
+      description: Error de validación de datos
+      headers:
+        X-Correlation-ID:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEstandar'
+          example:
+            codigo: "VALIDACION_CAMPO_REQUERIDO"
+            mensaje: "El campo monto es requerido"
+            campo: "credito.monto"
+    ErrorAutenticacion:
+      description: Error de autenticación
+      headers:
+        X-Correlation-ID:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEstandar'
+          example:
+            codigo: "AUTH_TOKEN_INVALIDO"
+            mensaje: "Token de autenticación inválido o expirado"
+    ErrorAutorizacion:
+      description: Error de autorización
+      headers:
+        X-Correlation-ID:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEstandar'
+          example:
+            codigo: "AUTH_PERMISO_INSUFICIENTE"
+            mensaje: "El cliente no tiene permisos para esta operación"
+    ErrorConflicto:
+      description: Conflicto de estado - solicitud duplicada
+      headers:
+        X-Correlation-ID:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEstandar'
+          example:
+            codigo: "SOLICITUD_DUPLICADA"
+            mensaje: "Ya existe una solicitud con este Idempotency-Key"
+            detalle: "La solicitud original fue procesada exitosamente"
+            campo: "Idempotency-Key"
+    ErrorNegocio:
+      description: Reglas de negocio no cumplidas
+      headers:
+        X-Correlation-ID:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEstandar'
+          example:
+            codigo: "MONTO_SUPERA_CAPACIDAD_PAGO"
+            mensaje: "El monto solicitado excede la capacidad de pago del cliente"
+            detalle: "Cuota propuesta (1687500) supera el 40% del ingreso neto (6800000)"
+    ErrorNoEncontrado:
+      description: Recurso no encontrado
+      headers:
+        X-Correlation-ID:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEstandar'
+          example:
+            codigo: "RECURSO_NO_ENCONTRADO"
+            mensaje: "La solicitud de crédito no existe"
+            detalle: "No se encontró ninguna solicitud con ID SOL-2024-99999999"
+    ErrorRateLimit:
+      description: Rate limit excedido
+      headers:
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEstandar'
+          example:
+            codigo: "RATE_LIMIT_EXCEDIDO"
+            mensaje: "Ha excedido el límite de solicitudes permitidas"
+            detalle: "Límite: 100 solicitudes por minuto"
+    ErrorInterno:
+      description: Error interno del servidor
+      headers:
+        X-Correlation-ID:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEstandar'
+          example:
+            codigo: "ERROR_INTERNO"
+            mensaje: "Error interno del servidor"
+            detalle: "Contacte al administrador si el problema persiste"
+    ErrorServicioNoDisponible:
+      description: Servicio no disponible - falla en dependencia
+      headers:
+        X-Correlation-ID:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEstandar'
+          example:
+            codigo: "BUREAU_TIMEOUT"
+            mensaje: "El servicio de buró de riesgos no está disponible temporalmente"
+            detalle: "Se reintentará automáticamente. Tiempo máximo de espera: 5s"
+  securitySchemes:
+    OAuth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.empresa.com/oauth/token
+          scopes:
+            credito:write: Permiso para crear solicitudes de crédito
+            credito:read: Permiso para consultar solicitudes
+            credito:desembolso: Permiso para ejecutar desembolsos
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API Key para autenticación simple
